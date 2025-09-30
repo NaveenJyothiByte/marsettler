@@ -1,0 +1,8 @@
+#BlueJ class context
+comment0.target=UptimeMonitor
+comment0.text=\n\ UptimeMonitor\:\ simple\ arithmetic\ model\ for\ uptime\ %.\n\ Simulate\ totalMillis\ and\ downtimeMillis,\ then\ query\ uptimePercent().\n
+comment1.params=totalMs\ injectedDowntimeMs
+comment1.target=void\ simulate(long,\ long)
+comment2.params=
+comment2.target=double\ uptimePercent()
+numComments=3

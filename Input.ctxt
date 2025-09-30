@@ -1,0 +1,19 @@
+#BlueJ class context
+comment0.target=Input
+comment1.params=prompt
+comment1.target=java.lang.String\ line(java.lang.String)
+comment2.params=prompt
+comment2.target=int\ intVal(java.lang.String)
+comment3.params=prompt
+comment3.target=long\ longVal(java.lang.String)
+comment4.params=prompt\ min\ max
+comment4.target=int\ intRange(java.lang.String,\ int,\ int)
+comment5.params=prompt
+comment5.target=java.time.LocalDate\ dateOptToday(java.lang.String)
+comment6.params=prompt
+comment6.target=java.time.LocalDate\ dateReq(java.lang.String)
+comment7.params=prompt
+comment7.target=java.time.LocalTime\ timeReq(java.lang.String)
+comment8.params=
+comment8.target=void\ pause()
+numComments=9
