@@ -1,0 +1,10 @@
+#BlueJ class context
+comment0.target=BackupService
+comment0.text=\n\ BackupService\:\ holds\ an\ in-memory\ copy\ of\ schedule\ data.\n\ Use\ with\ ScheduleService.snapshot()\ and\ restore().\n
+comment1.params=source
+comment1.target=void\ backup(java.util.Map)
+comment1.text=Capture\ a\ deep-ish\ copy\ of\ the\ provided\ schedule\ data
+comment2.params=
+comment2.target=java.util.Map\ restore()
+comment2.text=Return\ a\ copy\ of\ the\ last\ backup\ (may\ be\ empty\ if\ none)
+numComments=3
