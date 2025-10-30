@@ -1,242 +1,373 @@
-import java.time.*;
-import java.util.*;
+// Add these instance variables to the existing App class
+private EmergencyService emergencyService;
+private TaskAssignmentService taskAssignmentService;
+private TechnicianService technicianService;
 
-public class App {
-    private final UserStore store = new UserStore();
-    private AuthService auth;
-    private ScheduleService schedule;
-    private BackupService backup;
-    private UptimeMonitor uptime;
+// Update the bootstrap method
+private void bootstrap() {
+    store.seedSamples();
+    auth = new AuthService(store.backingMap(), 5, Duration.ofMinutes(15));
+    schedule = new ScheduleService();
+    backup = new BackupService();
+    uptime = new UptimeMonitor();
+    
+    // Sprint 3 services
+    emergencyService = new EmergencyService();
+    taskAssignmentService = new TaskAssignmentService();
+    technicianService = new TechnicianService();
+    
+    schedule.seedResidentTasks("resident.valid@mars.local");
+}
 
-    private User currentUser = null;
+// Add these new methods to the App class for Sprint 3 features
 
-    public void run() {
-        bootstrap();
-        loop();
-        System.out.println("Goodbye!");
+/**
+ * Emergency alert broadcasting - OPERATOR3
+ */
+private void doEmergencyAlert() {
+    if (!ensureActiveSession()) return;
+    if (currentUser.role != Role.MISSION_CONTROL_OPERATOR) {
+        System.out.println("Access denied: Only Mission Control Operators can broadcast emergency alerts.");
+        Input.pause();
+        return;
     }
+    
+    System.out.println("\n=== EMERGENCY ALERT CONSOLE ===");
+    System.out.println("Emergency Types:");
+    System.out.println("1) HABITAT BREACH - Immediate evacuation");
+    System.out.println("2) RADIATION STORM - Seek shelter");
+    System.out.println("3) FIRE - Deploy suppression");
+    System.out.println("4) LIFE SUPPORT FAILURE - Emergency protocols");
+    System.out.println("5) CUSTOM ALERT");
+    
+    int alertTypeChoice = Input.intRange("Select emergency type (1-5): ", 1, 5);
+    AlertType alertType = getAlertTypeFromChoice(alertTypeChoice);
+    
+    String message = Input.line("Enter alert message: ");
+    
+    System.out.println("Severity Levels:");
+    System.out.println("1) CRITICAL - Immediate life-threatening");
+    System.out.println("2) HIGH - Serious threat");
+    System.out.println("3) MEDIUM - Moderate risk");
+    System.out.println("4) LOW - Minor issue");
+    
+    int severityChoice = Input.intRange("Select severity (1-4): ", 1, 4);
+    Severity severity = getSeverityFromChoice(severityChoice);
+    
+    // Broadcast alert
+    List<String> deliveredUsers = emergencyService.broadcastEmergencyAlert(
+        alertType, message, severity, currentUser.userId);
+    
+    System.out.println("\n🚨 EMERGENCY ALERT BROADCAST!");
+    System.out.println("Alert sent to " + deliveredUsers.size() + " users.");
+    System.out.println("All users have been notified.");
+    Input.pause();
+}
 
-    private void bootstrap() {
-        store.seedSamples();
-        auth = new AuthService(store.backingMap(), 5, Duration.ofMinutes(15));
-        schedule = new ScheduleService();
-        backup = new BackupService();
-        uptime = new UptimeMonitor();
-
-        // seed tasks for the resident sample
-        schedule.seedResidentTasks("resident.valid@mars.local");
+/**
+ * Task assignment - OPERATOR2
+ */
+private void doAssignTask() {
+    if (!ensureActiveSession()) return;
+    if (currentUser.role != Role.MISSION_CONTROL_OPERATOR) {
+        System.out.println("Access denied: Only Mission Control Operators can assign tasks.");
+        Input.pause();
+        return;
     }
+    
+    System.out.println("\n=== TASK ASSIGNMENT ===");
+    
+    // Get available residents (simplified - in real system would query user store)
+    System.out.println("Available Residents:");
+    System.out.println("1) resident.valid@mars.local");
+    System.out.println("2) resident2@mars.local");
+    System.out.println("3) resident3@mars.local");
+    
+    int residentChoice = Input.intRange("Select resident (1-3): ", 1, 3);
+    String assigneeUsername = getResidentUsername(residentChoice);
+    
+    String taskTitle = Input.line("Enter task title: ");
+    int priority = Input.intRange("Enter priority (1=High, 5=Low): ", 1, 5);
+    LocalDate date = Input.dateReq("Enter due date (YYYY-MM-DD): ");
+    LocalTime time = Input.timeReq("Enter due time (HH:MM): ");
+    
+    AssignmentResult result = taskAssignmentService.assignTask(
+        currentUser.userId, assigneeUsername, taskTitle, priority, date, time);
+    
+    if (result.isSuccess()) {
+        System.out.println("\n✅ Task assigned successfully!");
+        System.out.println("Task ID: " + result.getTaskId());
+        System.out.println("Assigned to: " + assigneeUsername);
+    } else {
+        System.out.println("\n❌ Task assignment failed: " + result.getMessage());
+    }
+    Input.pause();
+}
 
-    private void loop() {
-        while (true) {
-            printHeader();
-            if (!isLoggedIn()) {
-                System.out.println("1) Login");
-                System.out.println("2) Create account");
-                System.out.println("11) Exit");
-                int c = Input.intVal("Choose an option: ");
-                switch (c) {
-                    case 1: doLogin(); break;
-                    case 2: doCreateAccount(); break;
-                    case 11: return;
-                    default: System.out.println("Invalid option."); Input.pause();
-                }
+/**
+ * Technician alert management - TECH1
+ */
+private void doViewAssignedAlerts() {
+    if (!ensureActiveSession()) return;
+    if (currentUser.role != Role.INFRASTRUCTURE_TECHNICIAN) {
+        System.out.println("Access denied: Only Infrastructure Technicians can view assigned alerts.");
+        Input.pause();
+        return;
+    }
+    
+    System.out.println("\n=== ASSIGNED ALERTS ===");
+    List<Alert> alerts = technicianService.getAssignedAlerts(currentUser.username);
+    
+    if (alerts.isEmpty()) {
+        System.out.println("No active alerts assigned to you.");
+    } else {
+        for (int i = 0; i < alerts.size(); i++) {
+            Alert alert = alerts.get(i);
+            System.out.println((i + 1) + ") " + alert);
+            boolean acknowledged = emergencyService.hasAcknowledgedAlert(currentUser.username, alert.getAlertId());
+            System.out.println("   Status: " + (acknowledged ? "ACKNOWLEDGED" : "PENDING ACKNOWLEDGMENT"));
+        }
+        
+        // Option to acknowledge
+        System.out.println("\nEnter alert number to acknowledge (0 to cancel): ");
+        int choice = Input.intVal("");
+        if (choice > 0 && choice <= alerts.size()) {
+            String alertId = alerts.get(choice - 1).getAlertId();
+            if (technicianService.acknowledgeTechnicianAlert(currentUser.username, alertId)) {
+                System.out.println("✅ Alert acknowledged!");
             } else {
-                System.out.println("2) View schedule by date");
-                System.out.println("3) Add/Update a task");
-                System.out.println("4) Show last schedule update timestamp");
-                System.out.println("5) Simulate inactivity (minutes)");
-                System.out.println("6) Show audit log");
-                System.out.println("7) Backup schedules");
-                System.out.println("8) Restore schedules from last backup");
-                System.out.println("9) Simulate uptime (total hours + downtime minutes)");
-                System.out.println("10) Logout"); // last among 2..10
-                System.out.println("11) Exit");
-                int c = Input.intVal("Choose an option: ");
-                switch (c) {
-                    case 2: doViewSchedule(); break;
-                    case 3: doAddOrUpdateTask(); break;
-                    case 4: showLastUpdate(); break;
-                    case 5: simulateInactivity(); break;
-                    case 6: showAuditLog(); break;
-                    case 7: doBackup(); break;
-                    case 8: doRestore(); break;
-                    case 9: simulateUptime(); break;
-                    case 10: doLogout(); break;
-                    case 11: return;
-                    default: System.out.println("Invalid option."); Input.pause();
-                }
+                System.out.println("❌ Failed to acknowledge alert.");
             }
         }
     }
+    Input.pause();
+}
 
-    // ----- UI helpers -----
-    private void printHeader() {
-        System.out.println("\n================ Mars Settler (Sprint 1) ================");
-        if (isLoggedIn()) {
-            boolean expired = auth.isSessionExpired(currentUser, Instant.now());
-            System.out.println("Logged in as: " + currentUser.username +
-                " | User ID: " + currentUser.userId +
-                " | Role: " + Role.pretty(currentUser.role) +
-                (expired ? "  (SESSION EXPIRED)" : ""));
-        } else {
-            System.out.println("Not logged in");
-        }
-    }
-
-    private boolean isLoggedIn() { return currentUser != null && currentUser.loggedIn; }
-
-    // ----- Auth / Account -----
-    private void doLogin() {
-        if (isLoggedIn()) { System.out.println("Already logged in."); Input.pause(); return; }
-        String userRaw = Input.line("Username: ");
-        String username = store.normalize(userRaw);
-        String password = Input.line("Password: ");
-
-        Optional<User> u = auth.login(username, password);
-        if (u.isPresent()) {
-            currentUser = u.get();
-            System.out.println("Login successful. Role: " + Role.pretty(currentUser.role) + " | User ID: " + currentUser.userId);
-        } else {
-            System.out.println("Login failed.");
-            List<String> log = auth.getAudit();
-            if (!log.isEmpty()) System.out.println("Audit: " + log.get(log.size() - 1));
-        }
+/**
+ * System diagnostics - TECH2
+ */
+private void doRunDiagnostics() {
+    if (!ensureActiveSession()) return;
+    if (currentUser.role != Role.INFRASTRUCTURE_TECHNICIAN) {
+        System.out.println("Access denied: Only Infrastructure Technicians can run diagnostics.");
         Input.pause();
+        return;
     }
+    
+    System.out.println("\n=== SYSTEM DIAGNOSTICS ===");
+    System.out.println("Available Systems:");
+    System.out.println("1) Life Support Systems");
+    System.out.println("2) Power Distribution");
+    System.out.println("3) Communication Array");
+    System.out.println("4) Water Reclamation");
+    System.out.println("5) Thermal Control");
+    
+    int systemChoice = Input.intRange("Select system (1-5): ", 1, 5);
+    SystemComponent component = getSystemComponentFromChoice(systemChoice);
+    
+    System.out.println("Running diagnostics on " + component + "...");
+    
+    // Simulate diagnostic processing time
+    try {
+        Thread.sleep(2000);
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    }
+    
+    DiagnosticReport report = technicianService.runSystemDiagnostics(currentUser.username, component);
+    
+    System.out.println("\n=== DIAGNOSTIC REPORT ===");
+    System.out.println("Report ID: " + report.getReportId());
+    System.out.println("System: " + report.getComponent());
+    System.out.println("Technician: " + report.getTechnicianId());
+    System.out.println("Generated: " + report.getGeneratedAt());
+    System.out.println("\nTest Results:");
+    
+    for (Map.Entry<String, String> entry : report.getTestResults().entrySet()) {
+        String status = entry.getValue();
+        String icon = status.equals("NORMAL") ? "✅" : status.startsWith("WARNING") ? "⚠️" : "❌";
+        System.out.println(icon + " " + entry.getKey() + ": " + entry.getValue());
+    }
+    
+    Input.pause();
+}
 
-    private void doCreateAccount() {
-        if (isLoggedIn()) { System.out.println("Already logged in."); Input.pause(); return; }
-        String username = store.normalize(Input.line("New username (email-like string): "));
-        if (store.exists(username)) { System.out.println("Account already exists. Please login."); Input.pause(); return; }
-        String password = Input.line("New password: ");
-        Role role = promptRole();
+/**
+ * Maintenance scheduling - TECH3
+ */
+private void doScheduleMaintenance() {
+    if (!ensureActiveSession()) return;
+    if (currentUser.role != Role.INFRASTRUCTURE_TECHNICIAN) {
+        System.out.println("Access denied: Only Infrastructure Technicians can schedule maintenance.");
+        Input.pause();
+        return;
+    }
+    
+    System.out.println("\n=== MAINTENANCE SCHEDULING ===");
+    System.out.println("Maintenance Types:");
+    System.out.println("1) Preventive - Routine check");
+    System.out.println("2) Corrective - Repair issue");
+    System.out.println("3) Emergency - Critical fix");
+    
+    int typeChoice = Input.intRange("Select type (1-3): ", 1, 3);
+    MaintenanceType maintenanceType = getMaintenanceTypeFromChoice(typeChoice);
+    
+    System.out.println("Systems:");
+    System.out.println("1) Life Support");
+    System.out.println("2) Power Distribution");
+    System.out.println("3) Communication");
+    System.out.println("4) Water Reclamation");
+    System.out.println("5) Thermal Control");
+    
+    int systemChoice = Input.intRange("Select system (1-5): ", 1, 5);
+    SystemComponent component = getSystemComponentFromChoice(systemChoice);
+    
+    String description = Input.line("Enter maintenance description: ");
+    LocalDate scheduledDate = Input.dateReq("Enter scheduled date (YYYY-MM-DD): ");
+    LocalTime startTime = Input.timeReq("Enter start time (HH:MM): ");
+    int durationHours = Input.intRange("Enter duration in hours: ", 1, 24);
+    
+    try {
+        MaintenanceTask task = technicianService.scheduleMaintenance(
+            currentUser.username, component, description, maintenanceType,
+            scheduledDate, startTime, durationHours);
+        
+        System.out.println("\n✅ Maintenance scheduled successfully!");
+        System.out.println("Work Order: " + task.getTaskId());
+        System.out.println("Scheduled: " + scheduledDate + " at " + startTime);
+        System.out.println("Duration: " + durationHours + " hours");
+        
+    } catch (IllegalArgumentException e) {
+        System.out.println("\n❌ Scheduling failed: " + e.getMessage());
+    }
+    
+    Input.pause();
+}
 
-        User u = store.addNew(username, password, AccountStatus.ACTIVE, role);
-        System.out.println("Account created: " + u.username + " | User ID: " + u.userId + " | Role: " + Role.pretty(role));
+// Helper methods for enum conversions
+private AlertType getAlertTypeFromChoice(int choice) {
+    switch (choice) {
+        case 1: return AlertType.HABITAT_BREACH;
+        case 2: return AlertType.RADIATION_STORM;
+        case 3: return AlertType.FIRE;
+        case 4: return AlertType.LIFE_SUPPORT_FAILURE;
+        case 5: return AlertType.CUSTOM;
+        default: return AlertType.CUSTOM;
+    }
+}
 
-        Optional<User> logged = auth.login(u.username, password);
-        if (logged.isPresent()) {
-            currentUser = logged.get();
-            System.out.println("Logged in as " + currentUser.username + " (User ID: " + currentUser.userId + ")");
-            if (currentUser.role == Role.COLONY_RESIDENT) {
-                schedule.seedResidentTasks(currentUser.username);
+private Severity getSeverityFromChoice(int choice) {
+    switch (choice) {
+        case 1: return Severity.CRITICAL;
+        case 2: return Severity.HIGH;
+        case 3: return Severity.MEDIUM;
+        case 4: return Severity.LOW;
+        default: return Severity.MEDIUM;
+    }
+}
+
+private String getResidentUsername(int choice) {
+    switch (choice) {
+        case 1: return "resident.valid@mars.local";
+        case 2: return "resident2@mars.local";
+        case 3: return "resident3@mars.local";
+        default: return "resident.valid@mars.local";
+    }
+}
+
+private SystemComponent getSystemComponentFromChoice(int choice) {
+    switch (choice) {
+        case 1: return SystemComponent.LIFE_SUPPORT;
+        case 2: return SystemComponent.POWER_DISTRIBUTION;
+        case 3: return SystemComponent.COMMUNICATION_ARRAY;
+        case 4: return SystemComponent.WATER_RECLAMATION;
+        case 5: return SystemComponent.THERMAL_CONTROL;
+        default: return SystemComponent.LIFE_SUPPORT;
+    }
+}
+
+private MaintenanceType getMaintenanceTypeFromChoice(int choice) {
+    switch (choice) {
+        case 1: return MaintenanceType.PREVENTIVE;
+        case 2: return MaintenanceType.CORRECTIVE;
+        case 3: return MaintenanceType.EMERGENCY;
+        default: return MaintenanceType.PREVENTIVE;
+    }
+}
+
+// Update the operator menu in the loop() method to include Sprint 3 options
+private void loop() {
+    while (true) {
+        printHeader();
+        
+        if (!isLoggedIn()) {
+            // Existing login menu...
+        } else {
+            // Base menu options for all roles
+            System.out.println("2) View schedule by date");
+            System.out.println("3) Add/Update a task");
+            // ... other existing options ...
+            System.out.println("9) View alerts");
+            
+            // Role-specific Sprint 3 options
+            if (currentUser.role == Role.MISSION_CONTROL_OPERATOR) {
+                System.out.println("12) Assign Tasks (OPERATOR2)");
+                System.out.println("13) Emergency Console (OPERATOR3)");
+                System.out.println("14) Performance Metrics");
             }
-        } else {
-            System.out.println("Unexpected: auto-login failed.");
-        }
-        Input.pause();
-    }
-
-    private Role promptRole() {
-        while (true) {
-            System.out.println("\nSelect account type:");
-            System.out.println("1) Colony Residents");
-            System.out.println("2) Mission Control Operators");
-            System.out.println("3) Infrastructure Technicians");
-            int r = Input.intVal("Enter 1-3: ");
-            switch (r) {
-                case 1: return Role.COLONY_RESIDENT;
-                case 2: return Role.MISSION_CONTROL_OPERATOR;
-                case 3: return Role.INFRASTRUCTURE_TECHNICIAN;
-                default: System.out.println("Invalid choice.");
+            
+            if (currentUser.role == Role.INFRASTRUCTURE_TECHNICIAN) {
+                System.out.println("15) View Assigned Alerts (TECH1)");
+                System.out.println("16) Run Diagnostics (TECH2)");
+                System.out.println("17) Schedule Maintenance (TECH3)");
+            }
+            
+            System.out.println("10) Logout");
+            System.out.println("11) Exit");
+            
+            int c = Input.intVal("Choose an option: ");
+            
+            switch (c) {
+                // Existing cases...
+                case 12: if (currentUser.role == Role.MISSION_CONTROL_OPERATOR) doAssignTask(); break;
+                case 13: if (currentUser.role == Role.MISSION_CONTROL_OPERATOR) doEmergencyAlert(); break;
+                case 14: if (currentUser.role == Role.MISSION_CONTROL_OPERATOR) doPerformanceMetrics(); break;
+                case 15: if (currentUser.role == Role.INFRASTRUCTURE_TECHNICIAN) doViewAssignedAlerts(); break;
+                case 16: if (currentUser.role == Role.INFRASTRUCTURE_TECHNICIAN) doRunDiagnostics(); break;
+                case 17: if (currentUser.role == Role.INFRASTRUCTURE_TECHNICIAN) doScheduleMaintenance(); break;
+                // ... rest of existing cases
             }
         }
     }
+}
 
-    private void doLogout() {
-        if (!isLoggedIn()) { System.out.println("No user is logged in."); Input.pause(); return; }
-        auth.logout(currentUser);
-        System.out.println("Logged out: " + currentUser.username + " (User ID: " + currentUser.userId + ")");
-        currentUser = null;
+/**
+ * Performance metrics display - OPERATOR2
+ */
+private void doPerformanceMetrics() {
+    if (!ensureActiveSession()) return;
+    if (currentUser.role != Role.MISSION_CONTROL_OPERATOR) {
+        System.out.println("Access denied: Only Mission Control Operators can view performance metrics.");
         Input.pause();
+        return;
     }
-
-    // ----- Features (login required) -----
-    private boolean ensureActiveSession() { return ensureActiveSession(true); }
-    private boolean ensureActiveSession(boolean refresh) {
-        if (!isLoggedIn()) { System.out.println("Please login first (option 1)."); Input.pause(); return false; }
-        boolean expired = auth.isSessionExpired(currentUser, Instant.now());
-        if (expired) { System.out.println("Your session has expired. Please login again."); Input.pause(); return false; }
-        if (refresh) auth.touch(currentUser);
-        return true;
+    
+    System.out.println("\n=== PERFORMANCE METRICS ===");
+    Map<String, TaskCompletionStats> allStats = taskAssignmentService.getAllUserStats();
+    
+    if (allStats.isEmpty()) {
+        System.out.println("No task completion data available.");
+    } else {
+        System.out.printf("%-25s %-8s %-8s %-8s %-12s%n", 
+            "User", "Assigned", "Completed", "Pending", "Completion Rate");
+        System.out.println("------------------------------------------------------------------------");
+        
+        for (TaskCompletionStats stats : allStats.values()) {
+            System.out.printf("%-25s %-8d %-8d %-8d %-11.1f%%%n",
+                stats.getUsername(), stats.getTotalAssigned(), stats.getTotalCompleted(),
+                stats.getPending(), stats.getCompletionRate());
+        }
     }
-
-    private void doViewSchedule() {
-        if (!ensureActiveSession()) return;
-        LocalDate date = Input.dateOptToday("Enter date (YYYY-MM-DD), blank for today: ");
-        if (date == null) return;
-        List<Task> tasks = schedule.getTasks(currentUser.username, date);
-        System.out.println("\nTasks for " + date + ": " + tasks.size());
-        if (tasks.isEmpty()) System.out.println("(No tasks for this date)");
-        else for (Task t : tasks) System.out.println(" - " + t);
-        Input.pause();
-    }
-
-    private void doAddOrUpdateTask() {
-        if (!ensureActiveSession()) return;
-        String id = Input.line("Task ID (e.g., t100): ");
-        String title = Input.line("Title: ");
-        int priority = Input.intRange("Priority (1=High .. 5=Low): ", 1, 5);
-        LocalDate date = Input.dateReq("Date (YYYY-MM-DD): ");
-        LocalTime time = Input.timeReq("Time (HH:MM 24h): ");
-        Task task = new Task(id, title, priority, date, time);
-        schedule.upsertTask(currentUser.username, task);
-        System.out.println("Task saved/updated.");
-        Input.pause();
-    }
-
-    private void showLastUpdate() {
-        if (!ensureActiveSession()) return;
-        Instant ts = schedule.getLastUpdate(currentUser.username);
-        System.out.println("Last schedule update: " + ts);
-        Input.pause();
-    }
-
-    private void simulateInactivity() {
-        if (!ensureActiveSession(false)) return;
-        int mins = Input.intVal("Simulate inactivity minutes: ");
-        if (mins < 0) mins = 0;
-        if (currentUser.lastActivity == null) currentUser.lastActivity = Instant.now();
-        currentUser.lastActivity = currentUser.lastActivity.minus(Duration.ofMinutes(mins));
-        boolean expired = auth.isSessionExpired(currentUser, Instant.now());
-        System.out.println("Session " + (expired ? "is EXPIRED." : "is still active."));
-        Input.pause();
-    }
-
-    private void showAuditLog() {
-        if (!ensureActiveSession()) return;
-        List<String> log = auth.getAudit();
-        if (log.isEmpty()) System.out.println("(Audit empty)");
-        for (String line : log) System.out.println(line);
-        Input.pause();
-    }
-
-    private void doBackup() {
-        if (!ensureActiveSession()) return;
-        Map<String, Map<LocalDate, List<Task>>> snap = schedule.snapshot();
-        backup.backup(snap);
-        System.out.println("Backup created. Users in snapshot: " + snap.keySet().size());
-        Input.pause();
-    }
-
-    private void doRestore() {
-        if (!ensureActiveSession()) return;
-        Map<String, Map<LocalDate, List<Task>>> restored = backup.restore();
-        schedule.restore(restored);
-        System.out.println("Restore applied. Users restored: " + restored.keySet().size());
-        Input.pause();
-    }
-
-    private void simulateUptime() {
-        if (!ensureActiveSession()) return;
-        long hours = Input.longVal("Total hours to simulate (e.g., 24): ");
-        long downtimeMinutes = Input.longVal("Downtime minutes (e.g., 1): ");
-        long totalMs = hours * 60L * 60L * 1000L;
-        long downMs = downtimeMinutes * 60L * 1000L;
-        uptime.simulate(totalMs, downMs);
-        double pct = uptime.uptimePercent();
-        System.out.printf("Uptime: %.5f%%%n", pct);
-        Input.pause();
-    }
+    
+    Input.pause();
 }
